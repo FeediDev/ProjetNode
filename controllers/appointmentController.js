@@ -1,15 +1,17 @@
 const Appointment = require("../models/Appointment");
+const sendEmail = require("../utils/emailService");  // Assurez-vous que ce chemin est correct
+
 const createAppointment = async (req, res) => {
     try {
         const { name, email, phone, department, doctor, date, message } = req.body;
         
-        // Check if the date is valid
+        // Vérifier si la date est valide
         const appointmentDate = new Date(date);
         if (isNaN(appointmentDate.getTime())) {
             return res.status(400).json({ message: 'Invalid date format' });
         }
 
-        // Create new appointment
+        // Créer un nouveau rendez-vous
         const appointment = new Appointment({
             name,
             email,
@@ -21,7 +23,25 @@ const createAppointment = async (req, res) => {
             status: 'scheduled'
         });
 
+        // Sauvegarder le rendez-vous dans la base de données
         await appointment.save();
+
+        // Envoi de l'email de confirmation
+        const emailSubject = "Confirmation de Rendez-vous";
+        const emailText = `
+            Bonjour ${name},
+
+            Votre rendez-vous a été confirmé avec ${doctor} dans le département ${department}.
+            Date du rendez-vous: ${appointmentDate.toLocaleString()}.
+            Message: ${message}
+
+            Merci de votre confiance !
+        `;
+
+        // Appel de la fonction sendEmail pour envoyer l'email
+        await sendEmail(email, emailSubject, emailText);
+
+        // Retourner une réponse de succès
         res.status(201).json({ message: 'Appointment created successfully', appointment });
     } catch (err) {
         console.error(err);

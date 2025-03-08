@@ -11,7 +11,7 @@ const { verifyToken, checkRole } = require('../middleware/authMiddleware');
 const router = express.Router();
 
 // Route pour créer un rendez-vous (accessible uniquement aux clients)
-router.post('/', verifyToken, checkRole('client'), createAppointment);
+router.post('/', verifyToken, checkRole('client'), createAppointment);  // Cette route appelle la fonction createAppointment, qui inclut l'envoi de l'email.
 
 // Route pour récupérer les rendez-vous de l'utilisateur connecté (client ou professionnel)
 router.get('/', verifyToken, getUserAppointments);
