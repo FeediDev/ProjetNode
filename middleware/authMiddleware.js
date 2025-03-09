@@ -1,5 +1,4 @@
 require('dotenv').config();
-
 const jwt = require('jsonwebtoken');
 const secret = process.env.JWT_SECRET;
 
@@ -12,7 +11,7 @@ const verifyToken = (req, res, next) => {
   // Récupère le token de l'en-tête Authorization
   const authHeader = req.header('Authorization');
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return res.status(401).json({ message: 'No token, authorization denied' });
+    return res.status(401).json({ message: 'Aucun token, autorisation refusée' });
   }
 
   const token = authHeader.split(' ')[1]; // "Bearer <token>"
@@ -24,20 +23,20 @@ const verifyToken = (req, res, next) => {
     next(); // Passe à la prochaine étape du middleware
   } catch (err) {
     // Gère les erreurs spécifiques de JWT
-    let message = 'Token is not valid';
+    let message = 'Token invalide';
     if (err.name === 'TokenExpiredError') {
-      message = 'Token has expired';
+      message = 'Le token a expiré';
     } else if (err.name === 'JsonWebTokenError') {
-      message = 'Invalid token';
+      message = 'Token invalide';
     }
     return res.status(401).json({ message });
   }
 };
 
-// Middleware pour vérifier les rôles
-const checkRole = (role) => (req, res, next) => {
-  if (req.user.role !== role) {
-    return res.status(403).json({ message: `Access denied. Requires ${role} role` });
+// Middleware pour vérifier les rôles (acceptant un tableau de rôles)
+const checkRole = (roles) => (req, res, next) => {
+  if (!roles.includes(req.user.role)) {
+    return res.status(403).json({ message: `Accès refusé. Rôle requis : ${roles.join(' ou ')}` });
   }
   next();
 };

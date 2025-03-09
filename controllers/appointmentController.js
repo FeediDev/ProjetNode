@@ -1,14 +1,20 @@
 const Appointment = require("../models/Appointment");
 const sendEmail = require("../utils/emailService");  // Assurez-vous que ce chemin est correct
 
+// 📌 Créer un rendez-vous
 const createAppointment = async (req, res) => {
     try {
         const { name, email, phone, department, doctor, date, message } = req.body;
-        
+
+        // Vérifier si l'utilisateur est autorisé à créer un rendez-vous
+        if (req.user.role !== "client") {
+            return res.status(403).json({ message: "Seuls les clients peuvent créer un rendez-vous" });
+        }
+
         // Vérifier si la date est valide
         const appointmentDate = new Date(date);
         if (isNaN(appointmentDate.getTime())) {
-            return res.status(400).json({ message: 'Invalid date format' });
+            return res.status(400).json({ message: 'Format de date invalide' });
         }
 
         // Créer un nouveau rendez-vous
@@ -20,7 +26,8 @@ const createAppointment = async (req, res) => {
             doctor,
             date: appointmentDate,
             message,
-            status: 'scheduled'
+            status: 'scheduled',
+            client: req.user.id  // Assigner le client connecté à ce rendez-vous
         });
 
         // Sauvegarder le rendez-vous dans la base de données
@@ -42,10 +49,10 @@ const createAppointment = async (req, res) => {
         await sendEmail(email, emailSubject, emailText);
 
         // Retourner une réponse de succès
-        res.status(201).json({ message: 'Appointment created successfully', appointment });
+        res.status(201).json({ message: 'Rendez-vous créé avec succès', appointment });
     } catch (err) {
         console.error(err);
-        res.status(500).json({ message: 'Error creating appointment', error: err.message });
+        res.status(500).json({ message: 'Erreur lors de la création du rendez-vous', error: err.message });
     }
 };
 
@@ -70,15 +77,20 @@ const getUserAppointments = async (req, res) => {
         const userId = req.user.id;
         const role = req.user.role;
 
-        // Vérifier que l'utilisateur est un client ou un professionnel
-        if (role !== "client" && role !== "professional") {
-            return res.status(403).json({ message: "Accès refusé. Réservé aux clients et professionnels" });
+        let query = {};
+
+        // Si l'utilisateur est un admin, il peut voir tous les rendez-vous
+        if (role === "admin") {
+            query = {};  // Pas de filtre, l'admin peut voir tous les rendez-vous
+        } else if (role === "client") {
+            query.client = userId;  // Le client peut uniquement voir ses rendez-vous
+        } else if (role === "professional") {
+            query.professional = userId;  // Le professionnel peut uniquement voir ses rendez-vous
+        } else {
+            return res.status(403).json({ message: "Accès refusé. Utilisateur non valide." });
         }
 
-        let query = {};
-        if (role === "client") query.client = userId;
-        if (role === "professional") query.professional = userId;
-
+        // Récupérer les rendez-vous en fonction du rôle de l'utilisateur
         const appointments = await Appointment.find(query).populate("client professional", "name email");
         res.json(appointments);
     } catch (error) {
@@ -86,10 +98,11 @@ const getUserAppointments = async (req, res) => {
     }
 };
 
+
 // 📌 Modifier un rendez-vous (ex: changer la date)
 const updateAppointment = async (req, res) => {
     try {
-        const { date, status } = req.body;
+        const { date, status, message, name } = req.body;  // Tu peux ajouter d'autres champs si nécessaire
         const appointmentId = req.params.id;
 
         // Vérifier que la date est valide et dans le futur
@@ -106,19 +119,32 @@ const updateAppointment = async (req, res) => {
             return res.status(404).json({ message: "Rendez-vous introuvable" });
         }
 
-        if (req.user.role === "client" && appointment.client.toString() !== req.user.id) {
+        // Admin peut modifier tous les rendez-vous
+        if (req.user.role === "admin") {
+            const updatedAppointment = await Appointment.findByIdAndUpdate(
+                appointmentId,
+                { name, date, status, message },
+                { new: true, runValidators: true } // Assurez-vous que les validateurs sont exécutés
+            ).populate("client professional", "name email");
+
+            return res.json({ message: "Rendez-vous mis à jour", appointment: updatedAppointment });
+        }
+
+        // Le professionnel ne peut modifier que ses propres rendez-vous
+        if (req.user.role === "professional" && appointment.professional.toString() !== req.user.id) {
             return res.status(403).json({ message: "Vous n'êtes pas autorisé à modifier ce rendez-vous" });
         }
 
-        if (req.user.role === "professional" && appointment.professional.toString() !== req.user.id) {
+        // Le client ne peut modifier que ses propres rendez-vous
+        if (req.user.role === "client" && appointment.client.toString() !== req.user.id) {
             return res.status(403).json({ message: "Vous n'êtes pas autorisé à modifier ce rendez-vous" });
         }
 
         // Mettre à jour le rendez-vous
         const updatedAppointment = await Appointment.findByIdAndUpdate(
             appointmentId,
-            { date, status },
-            { new: true }
+            { name, date, status, message },
+            { new: true, runValidators: true }
         ).populate("client professional", "name email");
 
         res.json({ message: "Rendez-vous mis à jour", appointment: updatedAppointment });
@@ -127,27 +153,34 @@ const updateAppointment = async (req, res) => {
     }
 };
 
+
+
+
 // 📌 Supprimer un rendez-vous
 const deleteAppointment = async (req, res) => {
     try {
         const appointmentId = req.params.id;
 
-        // Vérifier que l'utilisateur est autorisé à supprimer ce rendez-vous
+        // ✅ Vérifier si l'ID est au bon format ObjectId
+        if (!appointmentId.match(/^[0-9a-fA-F]{24}$/)) {
+            return res.status(400).json({ message: "ID de rendez-vous invalide" });
+        }
+
+        // ✅ Vérifier si le rendez-vous existe
         const appointment = await Appointment.findById(appointmentId);
         if (!appointment) {
             return res.status(404).json({ message: "Rendez-vous introuvable" });
         }
 
-        if (req.user.role === "client" && appointment.client.toString() !== req.user.id) {
+        // ✅ Seuls l'admin et le professionnel peuvent supprimer le rendez-vous
+        if (req.user.role !== "admin" && (req.user.role !== "professional" || appointment.professional?.toString() !== req.user.id)) {
             return res.status(403).json({ message: "Vous n'êtes pas autorisé à supprimer ce rendez-vous" });
         }
 
-        if (req.user.role === "professional" && appointment.professional.toString() !== req.user.id) {
-            return res.status(403).json({ message: "Vous n'êtes pas autorisé à supprimer ce rendez-vous" });
-        }
-
+        // ✅ Supprimer le rendez-vous
         await Appointment.findByIdAndDelete(appointmentId);
         res.json({ message: "Rendez-vous supprimé avec succès" });
+
     } catch (error) {
         res.status(500).json({ message: "Erreur lors de la suppression du rendez-vous", error: error.message });
     }
